@@ -1,133 +1,155 @@
-{ pkgs, ... }: {
-  channel = "stable-24.11";
+set -e
 
-  packages = [
-    pkgs.qemu
-    pkgs.htop
-    pkgs.cloudflared
-    pkgs.coreutils
-    pkgs.gnugrep
-    pkgs.wget
-    pkgs.git
-    pkgs.python3
-  ];
+# =========================
+# Paths
+# =========================
+VM_DIR="$HOME/qemu"
+RAW_DISK="$VM_DIR/windows10.qcow2"
+WIN_ISO="$VM_DIR/windows10.iso"
+VIRTIO_ISO="$VM_DIR/virtio-win.iso"
+NOVNC_DIR="$HOME/noVNC"
 
-  idx.workspace.onStart = {
-    qemu = ''
-      set -e
+OVMF_DIR="$VM_DIR/ovmf"
+OVMF_CODE="$OVMF_DIR/OVMF_CODE.fd"
+OVMF_VARS="$OVMF_DIR/OVMF_VARS.fd"
 
-      # =========================
-      # One-time cleanup
-      # =========================
-      if [ ! -f /home/user/.cleanup_done ]; then
-        rm -rf /home/user/.gradle/* /home/user/.emu/* || true
-        find /home/user -mindepth 1 -maxdepth 1 \
-          ! -name 'idx-windows-gui' \
-          ! -name '.cleanup_done' \
-          ! -name '.*' \
-          -exec rm -rf {} + || true
-        touch /home/user/.cleanup_done
-      fi
+mkdir -p "$VM_DIR" "$OVMF_DIR"
 
-      # =========================
-      # Paths
-      # =========================
-
-      SKIP_QCOW2_DOWNLOAD=0
-
-      VM_DIR="$HOME/qemu"
-      RAW_DISK="$VM_DIR/android.qcow2"
-      NOVNC_DIR="$HOME/noVNC"
-    
-
-      mkdir -p "$VM_DIR"
-
-      if [ "$SKIP_QCOW2_DOWNLOAD" -ne 1 ]; then
-  if [ ! -f "$RAW_DISK" ]; then
-    echo "Downloading QCOW2 disk..."
-    wget -O "$RAW_DISK" "https://api.cloud.hashicorp.com/vagrant-archivist/v1/object/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXkiOiJhbmRyb2lkOTByMi9hYmRyLzkwL2FuZHJvaWRxY293Mi83YmU3OThmZi1lYjlmLTExZjAtYjcyNS0xZTIyZjkxZDY5OGYiLCJtb2RlIjoiciIsImZpbGVuYW1lIjoiYWJkcl85MF9hbmRyb2lkcWNvdzJfYW1kNjQuYm94In0.SW41tPC7xJ4IRH-8t3_r6LTrJVXWCzKGeSZpB16YTS0"
-  else
-    echo "QCOW2 disk already exists, skipping download."
-  fi
-else
-  echo "SKIP_QCOW2_DOWNLOAD=1 → QCOW2 logic skipped."
+# =========================
+# Download OVMF (UEFI)
+# =========================
+if [ ! -f "$OVMF_CODE" ]; then
+  wget -O "$OVMF_CODE" \
+    https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_CODE.fd
 fi
 
-      # =========================
-      # Clone noVNC if missing
-      # =========================
-      if [ ! -d "$NOVNC_DIR/.git" ]; then
-        echo "Cloning noVNC..."
-        mkdir -p "$NOVNC_DIR"
-        git clone https://github.com/novnc/noVNC.git "$NOVNC_DIR"
-      else
-        echo "noVNC already exists, skipping clone."
-      fi
+if [ ! -f "$OVMF_VARS" ]; then
+  wget -O "$OVMF_VARS" \
+    https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_VARS.fd
+fi
 
-      # =========================
-      # Start QEMU (KVM + ANDROID 9.0 R2 + VMWARE VGA + E1000 NETWORK CARF) 28/8
-      # =========================
-      echo "Starting QEMU..."
-      nohup qemu-system-x86_64   -enable-kvm   -cpu host,+topoext,hv_relaxed,hv_spinlocks=0x1fff,hv-passthrough,+pae,+nx,kvm=on,+svm   -smp 8,cores=8  -M q35,usb=on   -device usb-tablet   -m 27.8G   -device virtio-balloon-pci   -vga vmware   -net nic,netdev=n0,model=e1000   -netdev user,id=n0,hostfwd=tcp::5901-:5901   -boot c   -device virtio-serial-pci   -device virtio-rng-pci   -uuid e47ddb84-fb4d-46f9-b531-14bb15156336 -vnc :0 -hda $RAW_DISK > /tmp/qemu.log 2>&1 &
+# =========================
+# Download Windows 10 ISO
+# =========================
+if [ ! -f "$WIN_ISO" ]; then
+  echo "Downloading Windows 10 22H2 ISO..."
+  wget -O "$WIN_ISO" \
+    https://archive.org/download/windows-10-22h2-english-x64/Win10_22H2_English_x64.iso
+fi
 
+# =========================
+# Download VirtIO ISO
+# =========================
+if [ ! -f "$VIRTIO_ISO" ]; then
+  wget -O "$VIRTIO_ISO" \
+    https://github.com/kmille36/idx-windows-gui/releases/download/1.0/virtio-win-0.1.271.iso
+fi
 
-      # =========================
-      # Start noVNC on port 8888
-      # =========================
-      echo "Starting noVNC..."
-      nohup "$NOVNC_DIR/utils/novnc_proxy" \
-        --vnc 127.0.0.1:5900 \
-        --listen 8888 \
-        > /tmp/novnc.log 2>&1 &
+# =========================
+# Clone noVNC
+# =========================
+if [ ! -d "$NOVNC_DIR/.git" ]; then
+  git clone https://github.com/novnc/noVNC.git "$NOVNC_DIR"
+fi
 
-      # =========================
-      # Start Cloudflared tunnel
-      # =========================
-      echo "Starting Cloudflared tunnel..."
-      nohup cloudflared tunnel \
-        --no-autoupdate \
-        --url http://localhost:8888 \
-        > /tmp/cloudflared.log 2>&1 &
+# =========================
+# Create Disk If Missing
+# =========================
+if [ ! -f "$RAW_DISK" ]; then
+  echo "Creating new disk (30GB)..."
+  qemu-img create -f qcow2 "$RAW_DISK" 30G
+fi
 
-      sleep 10
+# =========================
+# Auto Boot Detection
+# =========================
+if [ -f "$RAW_DISK" ]; then
+  DISK_SIZE=$(stat -c%s "$RAW_DISK")
+  if [ "$DISK_SIZE" -gt 5000000000 ]; then
+    echo "Windows detected → Booting from disk"
+    BOOT_ORDER="c"
+  else
+    echo "Disk empty → Booting installer"
+    BOOT_ORDER="d"
+  fi
+else
+  echo "No disk found → Booting installer"
+  BOOT_ORDER="d"
+fi
 
-      if grep -q "trycloudflare.com" /tmp/cloudflared.log; then
-        URL=$(grep -o "https://[a-z0-9.-]*trycloudflare.com" /tmp/cloudflared.log | head -n1)
-        echo "========================================="
-        echo " 🌍 Windows 11 QEMU + noVNC ready:"
-        echo "     $URL/vnc.html"
-        echo "     $URL/vnc.html" > /home/user/idx-windows-gui/noVNC-URL.txt
-        echo "========================================="
-      else
-        echo "❌ Cloudflared tunnel failed"
-      fi
+# =========================
+# Start QEMU
+# =========================
+echo "Starting Windows 10 VM..."
 
-      # =========================
-      # Keep workspace alive
-      # =========================
-      elapsed=0
-      while true; do
-        echo "Time elapsed: $elapsed min"
-        ((elapsed++))
-        sleep 60
-      done
-    '';
-  };
+nohup qemu-system-x86_64 \
+  -enable-kvm \
+  -cpu host \
+  -smp 4 \
+  -m 8192 \
+  -M q35 \
+  -device usb-tablet \
+  -device virtio-balloon-pci \
+  -vga virtio \
+  -netdev user,id=n0 \
+  -device virtio-net-pci,netdev=n0 \
+  -boot order=$BOOT_ORDER \
+  -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+  -drive if=pflash,format=raw,file="$OVMF_VARS" \
+  -drive file="$RAW_DISK",format=qcow2,if=virtio \
+  -cdrom "$WIN_ISO" \
+  -drive file="$VIRTIO_ISO",media=cdrom,if=ide \
+  -vnc :0 \
+  -display none \
+  > /tmp/qemu.log 2>&1 &
 
-  idx.previews = {
-    enable = true;
-    previews = {
-      qemu = {
-        manager = "web";
-        command = [
-          "bash" "-lc"
-          "echo 'noVNC running on port 8888'"
-        ];
-      };
-      terminal = {
-        manager = "web";
-        command = [ "bash" ];
-      };
-    };
-  };
-}
+# =========================
+# Start noVNC
+# =========================
+nohup "$NOVNC_DIR/utils/novnc_proxy" \
+  --vnc 127.0.0.1:5900 \
+  --listen 2016 \
+  > /tmp/novnc.log 2>&1 &
+
+# =========================
+# Start Cloudflare Tunnel
+# =========================
+nohup cloudflared tunnel \
+  --no-autoupdate \
+  --url http://localhost:2016 \
+  > /tmp/cloudflared.log 2>&1 &
+
+sleep 8
+
+# =========================
+# Show & Save URL
+# =========================
+if grep -q "trycloudflare.com" /tmp/cloudflared.log; then
+  URL=$(grep -o "https://[a-z0-9.-]*trycloudflare.com" /tmp/cloudflared.log | head -n1)
+
+  echo "========================================="
+  echo " 🌍 Windows 10 Ready:"
+  echo "     $URL/vnc.html"
+  echo "========================================="
+
+  SAVE_FILE="$VM_DIR/noVNC-URL.txt"
+
+  {
+    echo "========================================="
+    echo " Windows 10 VM Access"
+    echo " Created: $(date)"
+    echo " Boot Mode: $BOOT_ORDER"
+    echo ""
+    echo "$URL/vnc.html"
+    echo "========================================="
+  } > "$SAVE_FILE"
+
+  echo "URL saved to: $SAVE_FILE"
+else
+  echo "❌ Cloudflared tunnel failed"
+fi
+
+# =========================
+# Keep Workspace Alive
+# =========================
+while true; do sleep 99999; done
