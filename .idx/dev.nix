@@ -17,10 +17,10 @@
       set -e
 
       ########################
-      # CONFIG
+      # CONFIG (BISA DIUBAH)
       ########################
 
-      ISO_URL="https://go.microsoft.com/fwlink/p/?LinkID=2195443"
+      ISO_URL="https://archive.org/download/win-11.-pro.-24-h-2.-u-8.-x-64.-wpe_202502/WIN11.PRO.24H2.U8.X64.%28WPE%29.ISO"
       ISO_FILE="$HOME/windows-idx/win11-custom.iso"
 
       DISK_FILE="$HOME/windows-idx/win11.qcow2"
@@ -40,13 +40,13 @@
       mkdir -p "$WORKDIR"
       cd "$WORKDIR"
 
-      # Create disk if not exists
+      # Create disk jika belum ada
       if [ ! -f "$DISK_FILE" ]; then
         echo "Creating disk $DISK_SIZE..."
         qemu-img create -f qcow2 "$DISK_FILE" "$DISK_SIZE"
       fi
 
-      # Download ISO if first install
+      # Download ISO jika belum install
       if [ ! -f "$FLAG_FILE" ]; then
         if [ ! -f "$ISO_FILE" ]; then
           echo "Downloading Windows ISO..."
@@ -57,7 +57,9 @@
       ########################
       # Clone noVNC
       ########################
+
       if [ ! -d "$NOVNC_DIR/.git" ]; then
+        echo "Cloning noVNC..."
         git clone https://github.com/novnc/noVNC.git "$NOVNC_DIR"
       fi
 
@@ -123,16 +125,22 @@
 
       if grep -q "trycloudflare.com" /tmp/cloudflared.log; then
         URL=$(grep -o "https://[a-z0-9.-]*trycloudflare.com" /tmp/cloudflared.log | head -n1)
+
         echo "====================================="
         echo "🌍 Windows ready:"
         echo "$URL/vnc.html"
         echo "====================================="
+
+        # Simpan URL ke file
+        mkdir -p /home/user/idx-windows-gui
+        echo "$URL/vnc.html" > /home/user/idx-windows-gui/noVNC-URL.txt
+
       else
         echo "❌ Cloudflare tunnel failed"
       fi
 
       ########################
-      # KEEP ALIVE
+      # KEEP WORKSPACE ALIVE
       ########################
 
       while true; do
