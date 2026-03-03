@@ -1,155 +1,193 @@
-set -e
+{ pkgs, ... }: {
+  channel = "stable-24.11";
 
-# =========================
-# Paths
-# =========================
-VM_DIR="$HOME/qemu"
-RAW_DISK="$VM_DIR/windows10.qcow2"
-WIN_ISO="$VM_DIR/windows10.iso"
-VIRTIO_ISO="$VM_DIR/virtio-win.iso"
-NOVNC_DIR="$HOME/noVNC"
+  packages = [
+    pkgs.qemu
+    pkgs.htop
+    pkgs.cloudflared
+    pkgs.coreutils
+    pkgs.gnugrep
+    pkgs.wget
+    pkgs.git
+    pkgs.python3
+  ];
 
-OVMF_DIR="$VM_DIR/ovmf"
-OVMF_CODE="$OVMF_DIR/OVMF_CODE.fd"
-OVMF_VARS="$OVMF_DIR/OVMF_VARS.fd"
+  idx.workspace.onStart = {
+    qemu = ''
+      set -e
 
-mkdir -p "$VM_DIR" "$OVMF_DIR"
+      # =========================
+      # One-time cleanup
+      # =========================
+      if [ ! -f /home/user/.cleanup_done ]; then
+        rm -rf /home/user/.gradle/* /home/user/.emu/* || true
+        find /home/user -mindepth 1 -maxdepth 1 \
+          ! -name 'idx-windows-gui' \
+          ! -name '.cleanup_done' \
+          ! -name '.*' \
+          -exec rm -rf {} + || true
+        touch /home/user/.cleanup_done
+      fi
 
-# =========================
-# Download OVMF (UEFI)
-# =========================
-if [ ! -f "$OVMF_CODE" ]; then
-  wget -O "$OVMF_CODE" \
-    https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_CODE.fd
-fi
+      # =========================
+      # Paths
+      # =========================
+      VM_DIR="$HOME/qemu"
+      RAW_DISK="$VM_DIR/windows.qcow2"
+      WIN_ISO="$VM_DIR/WIN11.PRO.24H2.U8.X64.WPE.ISO"
+      VIRTIO_ISO="$VM_DIR/virtio-win.iso"
+      NOVNC_DIR="$HOME/noVNC"
 
-if [ ! -f "$OVMF_VARS" ]; then
-  wget -O "$OVMF_VARS" \
-    https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_VARS.fd
-fi
+      OVMF_DIR="$HOME/qemu/ovmf"
+      OVMF_CODE="$OVMF_DIR/OVMF_CODE.fd"
+      OVMF_VARS="$OVMF_DIR/OVMF_VARS.fd"
 
-# =========================
-# Download Windows 10 ISO
-# =========================
-if [ ! -f "$WIN_ISO" ]; then
-  echo "Downloading Windows 10 22H2 ISO..."
-  wget -O "$WIN_ISO" \
-    https://archive.org/download/windows-10-22h2-english-x64/Win10_22H2_English_x64.iso
-fi
+      mkdir -p "$OVMF_DIR" "$VM_DIR"
 
-# =========================
-# Download VirtIO ISO
-# =========================
-if [ ! -f "$VIRTIO_ISO" ]; then
-  wget -O "$VIRTIO_ISO" \
-    https://github.com/kmille36/idx-windows-gui/releases/download/1.0/virtio-win-0.1.271.iso
-fi
+      # =========================
+      # Download OVMF firmware if missing
+      # =========================
+      if [ ! -f "$OVMF_CODE" ]; then
+        echo "Downloading OVMF_CODE.fd..."
+        wget -O "$OVMF_CODE" https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_CODE.fd
+      else
+        echo "OVMF_CODE.fd already exists, skipping download."
+      fi
 
-# =========================
-# Clone noVNC
-# =========================
-if [ ! -d "$NOVNC_DIR/.git" ]; then
-  git clone https://github.com/novnc/noVNC.git "$NOVNC_DIR"
-fi
+      if [ ! -f "$OVMF_VARS" ]; then
+        echo "Downloading OVMF_VARS.fd..."
+        wget -O "$OVMF_VARS" https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_VARS.fd
+      else
+        echo "OVMF_VARS.fd already exists, skipping download."
+      fi
 
-# =========================
-# Create Disk If Missing
-# =========================
-if [ ! -f "$RAW_DISK" ]; then
-  echo "Creating new disk (30GB)..."
-  qemu-img create -f qcow2 "$RAW_DISK" 30G
-fi
+      # =========================
+      # Download Windows ISO if missing
+      # =========================
+      if [ ! -f "$WIN_ISO" ]; then
+        echo "Downloading Windows 11 ISO..."
+        wget -O "$WIN_ISO" "https://archive.org/download/win-11.-pro.-24-h-2.-u-8.-x-64.-wpe_202502/WIN11.PRO.24H2.U8.X64.%28WPE%29.ISO"
+      else
+        echo "Windows ISO already exists, skipping download."
+      fi
 
-# =========================
-# Auto Boot Detection
-# =========================
-if [ -f "$RAW_DISK" ]; then
-  DISK_SIZE=$(stat -c%s "$RAW_DISK")
-  if [ "$DISK_SIZE" -gt 5000000000 ]; then
-    echo "Windows detected → Booting from disk"
-    BOOT_ORDER="c"
-  else
-    echo "Disk empty → Booting installer"
-    BOOT_ORDER="d"
-  fi
-else
-  echo "No disk found → Booting installer"
-  BOOT_ORDER="d"
-fi
+      # =========================
+      # Download VirtIO drivers ISO if missing
+      # =========================
+      if [ ! -f "$VIRTIO_ISO" ]; then
+        echo "Downloading VirtIO drivers ISO..."
+        wget -O "$VIRTIO_ISO" \
+          https://github.com/kmille36/idx-windows-gui/releases/download/1.0/virtio-win-0.1.271.iso
+      else
+        echo "VirtIO ISO already exists, skipping download."
+      fi
 
-# =========================
-# Start QEMU
-# =========================
-echo "Starting Windows 10 VM..."
+      # =========================
+      # Clone noVNC if missing
+      # =========================
+      if [ ! -d "$NOVNC_DIR/.git" ]; then
+        echo "Cloning noVNC..."
+        mkdir -p "$NOVNC_DIR"
+        git clone https://github.com/novnc/noVNC.git "$NOVNC_DIR"
+      else
+        echo "noVNC already exists, skipping clone."
+      fi
 
-nohup qemu-system-x86_64 \
-  -enable-kvm \
-  -cpu host \
-  -smp 4 \
-  -m 8192 \
-  -M q35 \
-  -device usb-tablet \
-  -device virtio-balloon-pci \
-  -vga virtio \
-  -netdev user,id=n0 \
-  -device virtio-net-pci,netdev=n0 \
-  -boot order=$BOOT_ORDER \
-  -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
-  -drive if=pflash,format=raw,file="$OVMF_VARS" \
-  -drive file="$RAW_DISK",format=qcow2,if=virtio \
-  -cdrom "$WIN_ISO" \
-  -drive file="$VIRTIO_ISO",media=cdrom,if=ide \
-  -vnc :0 \
-  -display none \
-  > /tmp/qemu.log 2>&1 &
+      # =========================
+      # Create QCOW2 disk if missing
+      # =========================
+      if [ ! -f "$RAW_DISK" ]; then
+        echo "Creating QCOW2 disk..."
+        qemu-img create -f qcow2 "$RAW_DISK" 11G
+      else
+        echo "QCOW2 disk already exists, skipping creation."
+      fi
 
-# =========================
-# Start noVNC
-# =========================
-nohup "$NOVNC_DIR/utils/novnc_proxy" \
-  --vnc 127.0.0.1:5900 \
-  --listen 2016 \
-  > /tmp/novnc.log 2>&1 &
+      # =========================
+      # Start QEMU (KVM + VirtIO + UEFI)
+      # =========================
+      echo "Starting QEMU..."
+      nohup qemu-system-x86_64 \
+        -enable-kvm \
+        -cpu host,+topoext,hv_relaxed,hv_spinlocks=0x1fff,hv-passthrough,+pae,+nx,kvm=on,+svm \
+        -smp 8,cores=8 \
+        -M q35,usb=on \
+        -device usb-tablet \
+        -m 28672 \
+        -device virtio-balloon-pci \
+        -vga virtio \
+        -net nic,netdev=n0,model=virtio-net-pci \
+        -netdev user,id=n0,hostfwd=tcp::3389-:3389 \
+        -boot d \
+        -device virtio-serial-pci \
+        -device virtio-rng-pci \
+        -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+        -drive if=pflash,format=raw,file="$OVMF_VARS" \
+        -drive file="$RAW_DISK",format=qcow2,if=virtio \
+        -cdrom "$WIN_ISO" \
+        -drive file="$VIRTIO_ISO",media=cdrom,if=ide \
+        -uuid e47ddb84-fb4d-46f9-b531-14bb15156336 \
+        -vnc :0 \
+        -display none \
+        > /tmp/qemu.log 2>&1 &
 
-# =========================
-# Start Cloudflare Tunnel
-# =========================
-nohup cloudflared tunnel \
-  --no-autoupdate \
-  --url http://localhost:2016 \
-  > /tmp/cloudflared.log 2>&1 &
+      # =========================
+      # Start noVNC on port 8888
+      # =========================
+      echo "Starting noVNC..."
+      nohup "$NOVNC_DIR/utils/novnc_proxy" \
+        --vnc 127.0.0.1:5900 \
+        --listen 8888 \
+        > /tmp/novnc.log 2>&1 &
 
-sleep 8
+      # =========================
+      # Start Cloudflared tunnel
+      # =========================
+      echo "Starting Cloudflared tunnel..."
+      nohup cloudflared tunnel \
+        --no-autoupdate \
+        --url http://localhost:8888 \
+        > /tmp/cloudflared.log 2>&1 &
 
-# =========================
-# Show & Save URL
-# =========================
-if grep -q "trycloudflare.com" /tmp/cloudflared.log; then
-  URL=$(grep -o "https://[a-z0-9.-]*trycloudflare.com" /tmp/cloudflared.log | head -n1)
+      sleep 10
 
-  echo "========================================="
-  echo " 🌍 Windows 10 Ready:"
-  echo "     $URL/vnc.html"
-  echo "========================================="
+      if grep -q "trycloudflare.com" /tmp/cloudflared.log; then
+        URL=$(grep -o "https://[a-z0-9.-]*trycloudflare.com" /tmp/cloudflared.log | head -n1)
+        echo "========================================="
+        echo " 🌍 Windows 11 QEMU + noVNC ready:"
+        echo "     $URL/vnc.html"
+        echo "     $URL/vnc.html" > /home/user/idx-windows-gui/noVNC-URL.txt
+        echo "========================================="
+      else
+        echo "❌ Cloudflared tunnel failed"
+      fi
 
-  SAVE_FILE="$VM_DIR/noVNC-URL.txt"
+      # =========================
+      # Keep workspace alive
+      # =========================
+      elapsed=0
+      while true; do
+        echo "Time elapsed: $elapsed min"
+        ((elapsed++))
+        sleep 60
+      done
+    '';
+  };
 
-  {
-    echo "========================================="
-    echo " Windows 10 VM Access"
-    echo " Created: $(date)"
-    echo " Boot Mode: $BOOT_ORDER"
-    echo ""
-    echo "$URL/vnc.html"
-    echo "========================================="
-  } > "$SAVE_FILE"
-
-  echo "URL saved to: $SAVE_FILE"
-else
-  echo "❌ Cloudflared tunnel failed"
-fi
-
-# =========================
-# Keep Workspace Alive
-# =========================
-while true; do sleep 99999; done
+  idx.previews = {
+    enable = true;
+    previews = {
+      qemu = {
+        manager = "web";
+        command = [
+          "bash" "-lc"
+          "echo 'noVNC running on port 8888'"
+        ];
+      };
+      terminal = {
+        manager = "web";
+        command = [ "bash" ];
+      };
+    };
+  };
+}
