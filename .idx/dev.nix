@@ -13,112 +13,107 @@
   ];
 
   idx.workspace.onStart = {
-    qemu = ''
+    windows = ''
       set -e
 
-      # =========================
-      # One-time cleanup
-      # =========================
-      if [ ! -f /home/user/.cleanup_done ]; then
-        rm -rf /home/user/.gradle/* /home/user/.emu/* || true
-        find /home/user -mindepth 1 -maxdepth 1 \
-          ! -name 'idx-windows-gui' \
-          ! -name '.cleanup_done' \
-          ! -name '.*' \
-          -exec rm -rf {} + || true
-        touch /home/user/.cleanup_done
-      fi
+      ########################
+      # CONFIG
+      ########################
 
-      # =========================
-      # Paths
-      # =========================
-      VM_DIR="$HOME/qemu"
-      RAW_DISK="$VM_DIR/windows.qcow2"
-      WIN_ISO="$VM_DIR/WIN11.PRO.24H2.U8.X64.WPE.ISO"
-      VIRTIO_ISO="$VM_DIR/virtio-win.iso"
+      ISO_URL="https://go.microsoft.com/fwlink/p/?LinkID=2195443"
+      ISO_FILE="$HOME/windows-idx/win11-custom.iso"
+
+      DISK_FILE="$HOME/windows-idx/win11.qcow2"
+      DISK_SIZE="64G"
+
+      RAM="8G"
+      CORES="4"
+
+      FLAG_FILE="$HOME/windows-idx/installed.flag"
+      WORKDIR="$HOME/windows-idx"
       NOVNC_DIR="$HOME/noVNC"
 
-      mkdir -p "$VM_DIR"
+      ########################
+      # PREPARE
+      ########################
 
-      # =========================
-      # Download Windows ISO if missing
-      # =========================
-      if [ ! -f "$WIN_ISO" ]; then
-        echo "Downloading Windows 11 WPE ISO..."
-        wget -O "$WIN_ISO" "https://archive.org/download/win-11.-pro.-24-h-2.-u-8.-x-64.-wpe_202502/WIN11.PRO.24H2.U8.X64.%28WPE%29.ISO"
-      else
-        echo "Windows ISO already exists, skipping download."
+      mkdir -p "$WORKDIR"
+      cd "$WORKDIR"
+
+      # Create disk if not exists
+      if [ ! -f "$DISK_FILE" ]; then
+        echo "Creating disk $DISK_SIZE..."
+        qemu-img create -f qcow2 "$DISK_FILE" "$DISK_SIZE"
       fi
 
-      # =========================
-      # Download VirtIO drivers ISO if missing
-      # =========================
-      if [ ! -f "$VIRTIO_ISO" ]; then
-        echo "Downloading VirtIO drivers ISO..."
-        wget -O "$VIRTIO_ISO" \
-          https://github.com/kmille36/idx-windows-gui/releases/download/1.0/virtio-win-0.1.271.iso
-      else
-        echo "VirtIO ISO already exists, skipping download."
+      # Download ISO if first install
+      if [ ! -f "$FLAG_FILE" ]; then
+        if [ ! -f "$ISO_FILE" ]; then
+          echo "Downloading Windows ISO..."
+          wget --no-check-certificate -O "$ISO_FILE" "$ISO_URL"
+        fi
       fi
 
-      # =========================
-      # Clone noVNC if missing
-      # =========================
+      ########################
+      # Clone noVNC
+      ########################
       if [ ! -d "$NOVNC_DIR/.git" ]; then
-        echo "Cloning noVNC..."
-        mkdir -p "$NOVNC_DIR"
         git clone https://github.com/novnc/noVNC.git "$NOVNC_DIR"
-      else
-        echo "noVNC already exists, skipping clone."
       fi
 
-      # =========================
-      # Create QCOW2 disk if missing
-      # =========================
-      if [ ! -f "$RAW_DISK" ]; then
-        echo "Creating QCOW2 disk..."
-        qemu-img create -f qcow2 "$RAW_DISK" 14G
+      ########################
+      # START QEMU
+      ########################
+
+      if [ ! -f "$FLAG_FILE" ]; then
+        echo "⚠️ INSTALL MODE"
+
+        nohup qemu-system-x86_64 \
+          -enable-kvm \
+          -cpu host \
+          -smp "$CORES" \
+          -m "$RAM" \
+          -machine q35 \
+          -drive file="$DISK_FILE",format=qcow2 \
+          -cdrom "$ISO_FILE" \
+          -boot order=d \
+          -netdev user,id=n0,hostfwd=tcp::3389-:3389 \
+          -device e1000,netdev=n0 \
+          -vnc :0 \
+          -display none \
+          > /tmp/qemu.log 2>&1 &
+
       else
-        echo "QCOW2 disk already exists, skipping creation."
+        echo "✅ NORMAL BOOT MODE"
+
+        nohup qemu-system-x86_64 \
+          -enable-kvm \
+          -cpu host \
+          -smp "$CORES" \
+          -m "$RAM" \
+          -machine q35 \
+          -drive file="$DISK_FILE",format=qcow2 \
+          -boot order=c \
+          -netdev user,id=n0,hostfwd=tcp::3389-:3389 \
+          -device e1000,netdev=n0 \
+          -vnc :0 \
+          -display none \
+          > /tmp/qemu.log 2>&1 &
       fi
 
-      # =========================
-      # Start QEMU (Legacy BIOS for WPE ISO)
-      # =========================
-      echo "Starting QEMU..."
-      nohup qemu-system-x86_64 \
-        -enable-kvm \
-        -cpu host,+topoext,hv_relaxed,hv_spinlocks=0x1fff,hv-passthrough,+pae,+nx,kvm=on,+svm \
-        -smp 8,cores=8 \
-        -M q35,usb=on \
-        -device usb-tablet \
-        -m 28672 \
-        -device virtio-balloon-pci \
-        -vga virtio \
-        -net nic,netdev=n0,model=virtio-net-pci \
-        -netdev user,id=n0,hostfwd=tcp::3389-:3389 \
-        -boot d \
-        -drive file="$RAW_DISK",format=qcow2,if=virtio \
-        -cdrom "$WIN_ISO" \
-        -drive file="$VIRTIO_ISO",media=cdrom,if=ide \
-        -uuid e47ddb84-fb4d-46f9-b531-14bb15156336 \
-        -vnc :0 \
-        -display none \
-        > /tmp/qemu.log 2>&1 &
+      ########################
+      # START noVNC
+      ########################
 
-      # =========================
-      # Start noVNC on port 8888
-      # =========================
-      echo "Starting noVNC..."
       nohup "$NOVNC_DIR/utils/novnc_proxy" \
         --vnc 127.0.0.1:5900 \
         --listen 8888 \
         > /tmp/novnc.log 2>&1 &
 
-      # =========================
-      # Start Cloudflared tunnel
-      # =========================
-      echo "Starting Cloudflared tunnel..."
+      ########################
+      # START CLOUDFLARE
+      ########################
+
       nohup cloudflared tunnel \
         --no-autoupdate \
         --url http://localhost:8888 \
@@ -128,22 +123,19 @@
 
       if grep -q "trycloudflare.com" /tmp/cloudflared.log; then
         URL=$(grep -o "https://[a-z0-9.-]*trycloudflare.com" /tmp/cloudflared.log | head -n1)
-        echo "========================================="
-        echo " 🌍 Windows 11 WPE QEMU + noVNC ready:"
-        echo "     $URL/vnc.html"
-        echo "     $URL/vnc.html" > /home/user/idx-windows-gui/noVNC-URL.txt
-        echo "========================================="
+        echo "====================================="
+        echo "🌍 Windows ready:"
+        echo "$URL/vnc.html"
+        echo "====================================="
       else
-        echo "❌ Cloudflared tunnel failed"
+        echo "❌ Cloudflare tunnel failed"
       fi
 
-      # =========================
-      # Keep workspace alive
-      # =========================
-      elapsed=0
+      ########################
+      # KEEP ALIVE
+      ########################
+
       while true; do
-        echo "Time elapsed: $elapsed min"
-        ((elapsed++))
         sleep 60
       done
     '';
@@ -152,16 +144,12 @@
   idx.previews = {
     enable = true;
     previews = {
-      qemu = {
+      windows = {
         manager = "web";
         command = [
           "bash" "-lc"
-          "echo 'noVNC running on port 8888'"
+          "echo 'Windows running via noVNC (port 8888)'"
         ];
-      };
-      terminal = {
-        manager = "web";
-        command = [ "bash" ];
       };
     };
   };
