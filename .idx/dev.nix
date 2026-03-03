@@ -38,34 +38,13 @@
       VIRTIO_ISO="$VM_DIR/virtio-win.iso"
       NOVNC_DIR="$HOME/noVNC"
 
-      OVMF_DIR="$HOME/qemu/ovmf"
-      OVMF_CODE="$OVMF_DIR/OVMF_CODE.fd"
-      OVMF_VARS="$OVMF_DIR/OVMF_VARS.fd"
-
-      mkdir -p "$OVMF_DIR" "$VM_DIR"
-
-      # =========================
-      # Download OVMF firmware if missing
-      # =========================
-      if [ ! -f "$OVMF_CODE" ]; then
-        echo "Downloading OVMF_CODE.fd..."
-        wget -O "$OVMF_CODE" https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_CODE.fd
-      else
-        echo "OVMF_CODE.fd already exists, skipping download."
-      fi
-
-      if [ ! -f "$OVMF_VARS" ]; then
-        echo "Downloading OVMF_VARS.fd..."
-        wget -O "$OVMF_VARS" https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_VARS.fd
-      else
-        echo "OVMF_VARS.fd already exists, skipping download."
-      fi
+      mkdir -p "$VM_DIR"
 
       # =========================
       # Download Windows ISO if missing
       # =========================
       if [ ! -f "$WIN_ISO" ]; then
-        echo "Downloading Windows 11 ISO..."
+        echo "Downloading Windows 11 WPE ISO..."
         wget -O "$WIN_ISO" "https://archive.org/download/win-11.-pro.-24-h-2.-u-8.-x-64.-wpe_202502/WIN11.PRO.24H2.U8.X64.%28WPE%29.ISO"
       else
         echo "Windows ISO already exists, skipping download."
@@ -98,13 +77,13 @@
       # =========================
       if [ ! -f "$RAW_DISK" ]; then
         echo "Creating QCOW2 disk..."
-        qemu-img create -f qcow2 "$RAW_DISK" 11G
+        qemu-img create -f qcow2 "$RAW_DISK" 14G
       else
         echo "QCOW2 disk already exists, skipping creation."
       fi
 
       # =========================
-      # Start QEMU (KVM + VirtIO + UEFI)
+      # Start QEMU (Legacy BIOS for WPE ISO)
       # =========================
       echo "Starting QEMU..."
       nohup qemu-system-x86_64 \
@@ -119,10 +98,6 @@
         -net nic,netdev=n0,model=virtio-net-pci \
         -netdev user,id=n0,hostfwd=tcp::3389-:3389 \
         -boot d \
-        -device virtio-serial-pci \
-        -device virtio-rng-pci \
-        -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
-        -drive if=pflash,format=raw,file="$OVMF_VARS" \
         -drive file="$RAW_DISK",format=qcow2,if=virtio \
         -cdrom "$WIN_ISO" \
         -drive file="$VIRTIO_ISO",media=cdrom,if=ide \
@@ -154,7 +129,7 @@
       if grep -q "trycloudflare.com" /tmp/cloudflared.log; then
         URL=$(grep -o "https://[a-z0-9.-]*trycloudflare.com" /tmp/cloudflared.log | head -n1)
         echo "========================================="
-        echo " 🌍 Windows 11 QEMU + noVNC ready:"
+        echo " 🌍 Windows 11 WPE QEMU + noVNC ready:"
         echo "     $URL/vnc.html"
         echo "     $URL/vnc.html" > /home/user/idx-windows-gui/noVNC-URL.txt
         echo "========================================="
