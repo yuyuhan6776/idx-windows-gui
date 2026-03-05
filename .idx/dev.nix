@@ -24,9 +24,9 @@
       ISO_FILE="$HOME/windows-idx/win11-custom.iso"
 
       DISK_FILE="$HOME/windows-idx/win11.qcow2"
-      DISK_SIZE="64G"
+      DISK_SIZE="11G"
 
-      RAM="8G"
+      RAM="28G"
       CORES="4"
 
       FLAG_FILE="$HOME/windows-idx/installed.flag"
